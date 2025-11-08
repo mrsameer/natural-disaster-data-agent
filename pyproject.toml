@@ -1,0 +1,40 @@
+[project]
+name = "natural-disaster-data-agent"
+version = "1.0.0"
+description = "Federated Natural Disaster Data Pipeline and Analysis Platform"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # Core data processing
+    "pandas>=2.1.0",
+    "numpy>=1.24.0",
+
+    # Geospatial processing
+    "geopandas>=0.14.0",
+    "geopy>=2.4.0",
+    "shapely>=2.0.0",
+    "pyproj>=3.6.0",
+
+    # Data acquisition
+    "requests>=2.31.0",
+    "scrapy>=2.11.0",
+    "hdx-python-api>=6.2.0",
+
+    # Database
+    "psycopg2-binary>=2.9.9",
+    "sqlalchemy>=2.0.0",
+    "geoalchemy2>=0.14.0",
+
+    # Retry and resilience
+    "tenacity>=8.2.0",
+
+    # Dashboard
+    "plotly>=5.17.0",
+    "dash>=2.14.0",
+    "dash-bootstrap-components>=1.5.0",
+
+    # Utilities
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0.1",
+    "loguru>=0.7.0",
+]
