@@ -52,10 +52,9 @@ HDX_CONFIG = {
 # This agent uses Google Gemini LLM for intelligent event extraction from web sources
 WEB_AGENT_CONFIG = {
     "max_urls": int(os.getenv("WEB_AGENT_MAX_URLS", "5")),
-    "use_mock": os.getenv("WEB_AGENT_USE_MOCK", "false").lower() == "true",
     "google_api_key": os.getenv("GOOGLE_API_KEY"),
     "timeout": int(os.getenv("WEB_AGENT_TIMEOUT", "120")),
-    "search_engine": os.getenv("WEB_SEARCH_ENGINE", "duckduckgo"),  # or "google"
+    "search_engine": os.getenv("WEB_SEARCH_ENGINE", "duckduckgo"),
     "min_relevance_score": int(os.getenv("WEB_MIN_RELEVANCE_SCORE", "2")),
     "enable_llm_clustering": os.getenv("WEB_ENABLE_LLM_CLUSTERING", "true").lower() == "true",
 }

@@ -58,15 +58,14 @@ class WebAgent(BaseAgent):
 
         # Configuration
         self.max_urls = WEB_AGENT_CONFIG.get("max_urls", 3)
-        self.use_mock = WEB_AGENT_CONFIG.get("use_mock", False)
         self.google_api_key = WEB_AGENT_CONFIG.get("google_api_key")
         self.timeout = WEB_AGENT_CONFIG.get("timeout", 120)
 
         # Validate configuration
-        if not self.use_mock and not self.google_api_key:
-            self.logger.warning(
-                "GOOGLE_API_KEY not set. LLM-based event extraction will be disabled. "
-                "Set GOOGLE_API_KEY in .env or use WEB_AGENT_USE_MOCK=true"
+        if not self.google_api_key:
+            raise ValueError(
+                "GOOGLE_API_KEY not set. Set GOOGLE_API_KEY in .env file. "
+                "Get your API key from: https://aistudio.google.com/app/apikey"
             )
 
         # Statistics tracking
@@ -79,8 +78,7 @@ class WebAgent(BaseAgent):
         }
 
         self.logger.info(
-            f"WebAgent initialized: max_urls={self.max_urls}, "
-            f"mock_mode={self.use_mock}, timeout={self.timeout}s"
+            f"WebAgent initialized: max_urls={self.max_urls}, timeout={self.timeout}s"
         )
 
     @retry(
@@ -252,7 +250,6 @@ class WebAgent(BaseAgent):
             result = collect_and_process_disaster_data(
                 disaster_type=disaster_type,
                 max_urls=self.max_urls,
-                use_mock=self.use_mock,
                 user_query=user_query
             )
 
@@ -566,11 +563,6 @@ if __name__ == "__main__":
         type=int,
         help="Maximum number of URLs to crawl (overrides config)"
     )
-    parser.add_argument(
-        "--mock",
-        action="store_true",
-        help="Use mock data for testing"
-    )
 
     args = parser.parse_args()
 
@@ -580,8 +572,6 @@ if __name__ == "__main__":
     # Override config if specified
     if args.max_urls:
         agent.max_urls = args.max_urls
-    if args.mock:
-        agent.use_mock = True
 
     # Run agent
     try:
