@@ -253,10 +253,12 @@ class ETLPipeline:
             # Create event-source junction
             cursor.execute(
                 """
-                INSERT INTO event_source_junction (event_id, source_record_id)
-                VALUES (%s, %s)
+                INSERT INTO event_source_junction (
+                    event_time, event_id, source_record_id
+                )
+                VALUES (%s, %s, %s)
                 """,
-                (event_id, source_record_id)
+                (staging_record.get("event_time"), event_id, source_record_id)
             )
 
             # Mark staging record as processed

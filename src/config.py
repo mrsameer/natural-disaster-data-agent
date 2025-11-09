@@ -40,9 +40,11 @@ USGS_CONFIG = {
 }
 
 # HDX (EM-DAT) Configuration
+# Note: EM-DAT full database requires subscription
+# Using publicly available country profiles (aggregated data)
 HDX_CONFIG = {
     "site": os.getenv("HDX_SITE", "prod"),
-    "dataset_name": "emdat-natural-disasters",
+    "dataset_name": os.getenv("HDX_DATASET_NAME", "emdat-country-profiles"),
     "timeout": 60,
 }
 
