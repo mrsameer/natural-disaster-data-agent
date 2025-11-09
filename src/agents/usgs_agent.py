@@ -63,12 +63,32 @@ class USGSAgent(BaseAgent):
             self.logger.debug(f"Failed to fetch PAGER data: {e}")
             return None
 
+    def _fetch_date_range(
+        self, start_date: str, end_date: str, min_magnitude: float = 4.0
+    ) -> List[Dict]:
+        """Fetch earthquakes for a specific date range"""
+        params = {
+            "format": "geojson",
+            "starttime": start_date,
+            "endtime": end_date,
+            "minmagnitude": min_magnitude,
+            "orderby": "time",
+        }
+
+        query_url = f"{self.base_url}/query"
+        data = self._make_request(query_url, params)
+        return data.get("features", [])
+
     def fetch_data(
         self,
         start_date: Optional[str] = None,
-        end_date: Optional[str] = None
+        end_date: Optional[str] = None,
     ) -> List[Dict]:
-        """Fetch earthquake data from USGS"""
+        """Fetch earthquake data from USGS with automatic pagination
+
+        USGS API has a limit of 20,000 events per query. This method
+        automatically chunks large date ranges into smaller requests.
+        """
 
         if not start_date:
             start_date = USGS_CONFIG["start_date"]
@@ -77,21 +97,127 @@ class USGSAgent(BaseAgent):
 
         self.logger.info(f"Fetching USGS data from {start_date} to {end_date}")
 
-        # Build query parameters
-        params = {
-            "format": "geojson",
-            "starttime": start_date,
-            "endtime": end_date,
-            "minmagnitude": 4.0,  # Only significant earthquakes
-            "orderby": "time"
-        }
+        # Parse dates
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
 
-        # Fetch earthquake data
-        query_url = f"{self.base_url}/query"
-        data = self._make_request(query_url, params)
+        # Calculate number of days
+        total_days = (end_dt - start_dt).days
 
-        features = data.get("features", [])
-        self.logger.info(f"Fetched {len(features)} earthquakes")
+        # If date range is small (< 1 year), fetch directly
+        if total_days <= 365:
+            try:
+                features = self._fetch_date_range(start_date, end_date)
+                self.logger.info(f"Fetched {len(features)} earthquakes")
+            except Exception as e:
+                # If still too many, split into smaller chunks
+                if "exceeds search limit" in str(e).lower() or "400" in str(e):
+                    self.logger.warning(
+                        f"Too many events in range, splitting into 6-month chunks"
+                    )
+                    features = []
+                    chunk_size = 180  # 6 months
+                    current_dt = start_dt
+
+                    while current_dt < end_dt:
+                        chunk_end = min(
+                            current_dt + timedelta(days=chunk_size), end_dt
+                        )
+                        chunk_start_str = current_dt.strftime("%Y-%m-%d")
+                        chunk_end_str = chunk_end.strftime("%Y-%m-%d")
+
+                        self.logger.info(
+                            f"Fetching chunk: {chunk_start_str} to {chunk_end_str}"
+                        )
+                        chunk_features = self._fetch_date_range(
+                            chunk_start_str, chunk_end_str
+                        )
+                        features.extend(chunk_features)
+                        self.logger.info(
+                            f"Fetched {len(chunk_features)} earthquakes "
+                            f"from chunk ({len(features)} total so far)"
+                        )
+
+                        current_dt = chunk_end + timedelta(days=1)
+                else:
+                    raise
+        else:
+            # Split into yearly chunks for large date ranges
+            self.logger.info(
+                f"Large date range ({total_days} days), "
+                f"splitting into yearly chunks"
+            )
+            features = []
+            current_dt = start_dt
+
+            while current_dt < end_dt:
+                # Chunk by year
+                chunk_end = min(
+                    datetime(current_dt.year + 1, 1, 1) - timedelta(days=1), end_dt
+                )
+                chunk_start_str = current_dt.strftime("%Y-%m-%d")
+                chunk_end_str = chunk_end.strftime("%Y-%m-%d")
+
+                self.logger.info(
+                    f"Fetching chunk: {chunk_start_str} to {chunk_end_str}"
+                )
+                try:
+                    chunk_features = self._fetch_date_range(
+                        chunk_start_str, chunk_end_str
+                    )
+                    features.extend(chunk_features)
+                    self.logger.info(
+                        f"Fetched {len(chunk_features)} earthquakes "
+                        f"from chunk ({len(features)} total so far)"
+                    )
+                except Exception as e:
+                    # If a year still has too many events, split into months
+                    if "exceeds search limit" in str(e).lower() or "400" in str(e):
+                        self.logger.warning(
+                            f"Year {current_dt.year} has too many events, "
+                            f"splitting into monthly chunks"
+                        )
+                        month_dt = current_dt
+                        year_end = chunk_end
+
+                        while month_dt <= year_end:
+                            # Calculate month end
+                            if month_dt.month == 12:
+                                month_end = datetime(month_dt.year + 1, 1, 1) - timedelta(
+                                    days=1
+                                )
+                            else:
+                                month_end = datetime(
+                                    month_dt.year, month_dt.month + 1, 1
+                                ) - timedelta(days=1)
+
+                            month_end = min(month_end, year_end)
+
+                            month_start_str = month_dt.strftime("%Y-%m-%d")
+                            month_end_str = month_end.strftime("%Y-%m-%d")
+
+                            self.logger.info(
+                                f"Fetching monthly chunk: "
+                                f"{month_start_str} to {month_end_str}"
+                            )
+                            month_features = self._fetch_date_range(
+                                month_start_str, month_end_str
+                            )
+                            features.extend(month_features)
+                            self.logger.info(
+                                f"Fetched {len(month_features)} earthquakes "
+                                f"from month ({len(features)} total so far)"
+                            )
+
+                            # Move to next month
+                            month_dt = month_end + timedelta(days=1)
+                    else:
+                        raise
+
+                # Move to next year
+                current_dt = datetime(current_dt.year + 1, 1, 1)
+
+        self.logger.info(f"Total earthquakes fetched: {len(features)}")
 
         records = []
         for feature in features:
