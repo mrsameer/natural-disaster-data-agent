@@ -62,7 +62,7 @@ CREATE INDEX IF NOT EXISTS idx_source_staging_id ON source_audit_dim (staging_ev
 
 -- Event Fact Table (Central Metrics Table)
 CREATE TABLE IF NOT EXISTS event_fact (
-    event_id BIGSERIAL,
+    event_id BIGSERIAL PRIMARY KEY,  -- <-- ADDED PRIMARY KEY HERE
     event_time TIMESTAMPTZ NOT NULL,        -- Event start time (UTC) - Hypertable dimension
     event_time_end TIMESTAMPTZ,             -- Event end time (if applicable)
     location_id BIGINT REFERENCES location_dim(location_id),
