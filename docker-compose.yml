@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   postgres:
-    image: timescale/timescaledb-ha:pg16-latest
+    image: timescale/timescaledb-ha:pg17.6-ts2.23.0-all-oss
     container_name: disaster_db
     environment:
       POSTGRES_DB: disaster_data
