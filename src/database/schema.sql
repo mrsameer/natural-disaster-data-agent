@@ -59,47 +59,54 @@ CREATE INDEX IF NOT EXISTS idx_source_staging_id ON source_audit_dim (staging_ev
 -- ============================================================================
 -- FACT TABLE (TimescaleDB Hypertable)
 -- ============================================================================
+-- FACT TABLE (TimescaleDB Hypertable)
+DROP TABLE IF EXISTS event_fact CASCADE;
 
--- Event Fact Table (Central Metrics Table)
 CREATE TABLE IF NOT EXISTS event_fact (
-    event_id BIGSERIAL PRIMARY KEY,  -- <-- ADDED PRIMARY KEY HERE
-    event_time TIMESTAMPTZ NOT NULL,        -- Event start time (UTC) - Hypertable dimension
-    event_time_end TIMESTAMPTZ,             -- Event end time (if applicable)
+    event_id BIGSERIAL NOT NULL,
+    event_time TIMESTAMPTZ NOT NULL,        -- time partition key
+    event_time_end TIMESTAMPTZ,
     location_id BIGINT REFERENCES location_dim(location_id),
     event_type_id INT REFERENCES event_type_dim(event_type_id),
     magnitude_id BIGINT REFERENCES magnitude_dim(magnitude_id),
-    fatalities_total INT,                   -- Total deaths
-    economic_loss_usd BIGINT,               -- Economic loss in USD
-    affected_total INT,                     -- Total people affected
-    is_master_event BOOLEAN DEFAULT false,  -- True if deduplicated master record
-    master_event_id BIGINT,                 -- Self-reference to master if duplicate
-    confidence_score FLOAT,                 -- Deduplication confidence (0-1)
+    fatalities_total INT,
+    economic_loss_usd BIGINT,
+    affected_total INT,
+    is_master_event BOOLEAN DEFAULT false,
+    master_event_id BIGINT,
+    confidence_score FLOAT,
     created_at TIMESTAMPTZ DEFAULT now(),
-    updated_at TIMESTAMPTZ DEFAULT now()
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    -- Timescale requires the time column to be part of any UNIQUE/PK
+    PRIMARY KEY (event_time, event_id),
+    -- Optional data guard
+    CHECK (event_time_end IS NULL OR event_time_end >= event_time)
 );
 
--- Convert to TimescaleDB hypertable (time-series optimization)
+-- Convert to hypertable
 SELECT create_hypertable('event_fact', 'event_time',
     chunk_time_interval => INTERVAL '1 month',
     if_not_exists => TRUE
 );
 
--- Create indexes on fact table
+-- Helpful indexes (note: NOT UNIQUE)
+CREATE INDEX IF NOT EXISTS idx_event_id ON event_fact (event_id);
 CREATE INDEX IF NOT EXISTS idx_event_location ON event_fact (location_id, event_time DESC);
 CREATE INDEX IF NOT EXISTS idx_event_type ON event_fact (event_type_id, event_time DESC);
 CREATE INDEX IF NOT EXISTS idx_event_master ON event_fact (is_master_event, event_time DESC);
 CREATE INDEX IF NOT EXISTS idx_event_time ON event_fact (event_time DESC);
 
--- ============================================================================
--- EVENT-SOURCE JUNCTION TABLE (Many-to-Many Relationship)
--- ============================================================================
+-- EVENT-SOURCE JUNCTION (FK must include event_time to match PK)
+DROP TABLE IF EXISTS event_source_junction CASCADE;
 
--- Links master events to their constituent source records
 CREATE TABLE IF NOT EXISTS event_source_junction (
-    event_id BIGINT REFERENCES event_fact(event_id),
+    event_time TIMESTAMPTZ NOT NULL,
+    event_id   BIGINT NOT NULL,
     source_record_id BIGINT REFERENCES source_audit_dim(source_record_id),
-    contribution_weight FLOAT DEFAULT 1.0,   -- How much this source contributed
-    PRIMARY KEY (event_id, source_record_id)
+    contribution_weight FLOAT DEFAULT 1.0,
+    PRIMARY KEY (event_time, event_id, source_record_id),
+    FOREIGN KEY (event_time, event_id)
+        REFERENCES event_fact (event_time, event_id)
 );
 
 -- ============================================================================
@@ -247,7 +254,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Create view for master events with full context
+DROP VIEW IF EXISTS v_master_events;
+
 CREATE OR REPLACE VIEW v_master_events AS
 SELECT
     e.event_id,
@@ -263,20 +271,41 @@ SELECT
     l.city,
     l.state,
     l.country_iso3,
-    ST_Y(l.geom::geometry) AS latitude,
-    ST_X(l.geom::geometry) AS longitude,
+    -- guard ST_X/Y when geom is NULL
+    CASE WHEN l.geom IS NOT NULL THEN ST_Y(l.geom::geometry) END AS latitude,
+    CASE WHEN l.geom IS NOT NULL THEN ST_X(l.geom::geometry) END AS longitude,
     m.primary_value AS magnitude,
-    m.primary_unit AS magnitude_unit,
+    m.primary_unit  AS magnitude_unit,
     e.created_at,
     ARRAY_AGG(DISTINCT sa.source_name) AS sources
 FROM event_fact e
-LEFT JOIN event_type_dim et ON e.event_type_id = et.event_type_id
-LEFT JOIN location_dim l ON e.location_id = l.location_id
-LEFT JOIN magnitude_dim m ON e.magnitude_id = m.magnitude_id
-LEFT JOIN event_source_junction esj ON e.event_id = esj.event_id
-LEFT JOIN source_audit_dim sa ON esj.source_record_id = sa.source_record_id
+LEFT JOIN event_type_dim      et  ON e.event_type_id = et.event_type_id
+LEFT JOIN location_dim        l   ON e.location_id   = l.location_id
+LEFT JOIN magnitude_dim       m   ON e.magnitude_id  = m.magnitude_id
+LEFT JOIN event_source_junction esj
+  ON esj.event_id = e.event_id AND esj.event_time = e.event_time
+LEFT JOIN source_audit_dim    sa  ON esj.source_record_id = sa.source_record_id
 WHERE e.is_master_event = true
-GROUP BY e.event_id, et.event_type_id, l.location_id, m.magnitude_id;
+GROUP BY
+    e.event_id,
+    e.event_time,
+    e.event_time_end,
+    e.fatalities_total,
+    e.economic_loss_usd,
+    e.affected_total,
+    et.disaster_group,
+    et.disaster_type,
+    et.disaster_subtype,
+    l.location_name,
+    l.city,
+    l.state,
+    l.country_iso3,
+    l.geom,
+    m.primary_value,
+    m.primary_unit,
+    e.created_at;
+
+GRANT SELECT ON v_master_events TO disaster_user;
 
 -- Grant permissions on view
 GRANT SELECT ON v_master_events TO disaster_user;
