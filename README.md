@@ -85,6 +85,29 @@ Use the bundled LiteLLM proxy to expose the locally running Ollama `gpt-oss:20b`
 
 Configuration lives in `infra/litellm/config.yaml`. Update `api_base` if Ollama runs elsewhere, adjust model mappings, and change `LITELLM_PROXY_SECRET` in the compose file before exposing the service outside of localhost. The compose file maps `host.docker.internal` to the host machine so the LiteLLM container can reach the Ollama server listening on `11434`.
 
+## 🌐 Web Agent API Service
+
+Trigger the AI-powered web crawler via HTTP. The service uses FastAPI and runs inside Docker.
+
+1. Provide a `GOOGLE_API_KEY` (Gemini) in your `.env`.
+2. Start the service together with the rest of the stack:
+   ```bash
+   docker-compose up -d web_agent_api
+   ```
+3. Hit the `/scrape` endpoint with the topic you want to monitor:
+   ```bash
+   curl -X POST http://localhost:8080/scrape \
+     -H "Content-Type: application/json" \
+     -d '{
+       "topic": "floods in india",
+       "start_date": "2025-01-01",
+       "end_date": "2025-01-31",
+       "save_to_db": true
+     }'
+   ```
+
+The API kicks off the underlying `WebAgent`, returns the extracted records in the response, and (optionally) persists them to `staging.raw_events` if `save_to_db` is set. Use `GET /health` for a quick readiness check.
+
 ## 📊 Database Setup
 
 ### Using Docker (Automatic)

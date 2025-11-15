@@ -109,6 +109,32 @@ services:
       - disaster_network
     command: python -m src.dashboard.app
 
+  web_agent_api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: web_agent_api
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=disaster_data
+      - DB_USER=disaster_user
+      - DB_PASSWORD=disaster_pass
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - WEB_AGENT_MAX_URLS=${WEB_AGENT_MAX_URLS:-5}
+      - WEB_AGENT_TIMEOUT=${WEB_AGENT_TIMEOUT:-120}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - disaster_network
+    command: >
+      uvicorn src.services.web_agent_api:app --host 0.0.0.0 --port 8080
+
 volumes:
   postgres_data:
 
