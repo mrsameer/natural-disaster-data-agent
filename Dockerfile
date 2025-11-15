@@ -23,6 +23,9 @@ COPY src/ ./src/
 # Install Python dependencies using UV
 RUN uv pip install --system -e .
 
+# Install Playwright browsers required by Crawl4AI
+RUN python -m playwright install --with-deps chromium
+
 # Create necessary directories
 RUN mkdir -p /app/data /app/logs
 

@@ -108,6 +108,40 @@ Trigger the AI-powered web crawler via HTTP. The service uses FastAPI and runs i
 
 The API kicks off the underlying `WebAgent`, returns the extracted records in the response, and (optionally) persists them to `staging.raw_events` if `save_to_db` is set. Use `GET /health` for a quick readiness check.
 
+## 🧠 Using LiteLLM Proxy with ADK
+
+LiteLLM proxy provides a unified API surface for any hosted model (like your local Ollama `gpt-oss:20b`). The Web Agent automatically falls back to LiteLLM whenever `GOOGLE_API_KEY` is absent but the proxy settings are enabled.
+
+### Required environment variables
+
+| Variable | Description |
+| --- | --- |
+| `USE_LITELLM_PROXY` | Set to `true` to activate the proxy fallback. |
+| `LITELLM_PROXY_API_KEY` | API key you configured for LiteLLM (`changeme-litellm` by default in `infra/litellm/docker-compose.yml`). |
+| `LITELLM_PROXY_API_BASE` | Base URL of the proxy (e.g., `http://localhost:4000`). |
+| `LITELLM_PROXY_MODEL` | Model identifier exposed by LiteLLM (`gpt-oss:20b`). |
+
+Add these to `.env` (or export before running):
+
+```bash
+export USE_LITELLM_PROXY=true
+export LITELLM_PROXY_API_KEY=changeme-litellm
+export LITELLM_PROXY_API_BASE=http://host.docker.internal:4000  # use host.docker.internal when calling from Docker
+export LITELLM_PROXY_MODEL=gpt-oss:20b
+```
+
+With those variables, the AI web agent and its Dockerized API will automatically call the LiteLLM proxy instead of Gemini. If you need to script against LiteLLM directly, configure the client the same way:
+
+```python
+import os
+
+os.environ["LITELLM_PROXY_API_KEY"] = "changeme-litellm"
+os.environ["LITELLM_PROXY_API_BASE"] = "http://localhost:4000"
+os.environ["USE_LITELLM_PROXY"] = "true"
+```
+
+Leave `GOOGLE_API_KEY` blank (or unset) to force this fallback; if a Gemini key is present, it takes precedence. Any agent that uses LiteLLM can then be initialized with `litellm.use_litellm_proxy = True` and pointed at the `gpt-oss:20b` model exposed via the proxy.
+
 ## 📊 Database Setup
 
 ### Using Docker (Automatic)
@@ -144,6 +178,7 @@ USGS_START_DATE=2010-01-01
 # ETL
 BATCH_SIZE=1000
 MAX_WORKERS=4
+WEB_AGENT_LLM_TIMEOUT=1200
 
 # Dashboard
 DASH_PORT=8050

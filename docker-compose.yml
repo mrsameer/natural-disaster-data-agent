@@ -123,6 +123,10 @@ services:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - WEB_AGENT_MAX_URLS=${WEB_AGENT_MAX_URLS:-5}
       - WEB_AGENT_TIMEOUT=${WEB_AGENT_TIMEOUT:-120}
+      - USE_LITELLM_PROXY=${USE_LITELLM_PROXY:-false}
+      - LITELLM_PROXY_API_KEY=${LITELLM_PROXY_API_KEY}
+      - LITELLM_PROXY_API_BASE=${LITELLM_PROXY_API_BASE:-http://host.docker.internal:4000}
+      - LITELLM_PROXY_MODEL=${LITELLM_PROXY_MODEL:-gpt-oss:20b}
     depends_on:
       postgres:
         condition: service_healthy

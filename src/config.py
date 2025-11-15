@@ -1,11 +1,47 @@
 """Configuration management for the disaster data platform"""
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
+
+
+def _sanitize_env_value(value: Optional[str], placeholders: Optional[Sequence[str]] = None) -> Optional[str]:
+    """Normalize env values, treating blanks or placeholders as unset."""
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+
+    # Remove inline comments that start with '#'
+    if "#" in cleaned:
+        hash_index = cleaned.find("#")
+        if hash_index == 0:
+            return None
+        cleaned = cleaned[:hash_index].rstrip()
+
+    if not cleaned:
+        return None
+    if placeholders:
+        lowered = cleaned.lower()
+        for placeholder in placeholders:
+            if lowered == placeholder.lower():
+                return None
+    return cleaned
+
+
+def _get_env(
+    name: str,
+    default: Optional[str] = None,
+    placeholders: Optional[Sequence[str]] = None,
+) -> Optional[str]:
+    raw = os.getenv(name)
+    if raw is None:
+        raw = default
+    return _sanitize_env_value(raw, placeholders)
 
 # Base paths
 BASE_DIR = Path(__file__).parent.parent
@@ -50,13 +86,28 @@ HDX_CONFIG = {
 
 # Web Agent Configuration (Google ADK + AI Crawling)
 # This agent uses Google Gemini LLM for intelligent event extraction from web sources
+_google_api_key = _get_env("GOOGLE_API_KEY", placeholders=["your_google_api_key_here"])
+_google_model = _get_env("GOOGLE_GEMINI_MODEL", default="gemini-2.0-flash-exp") or "gemini-2.0-flash-exp"
+_litellm_proxy_api_key = _get_env("LITELLM_PROXY_API_KEY", default="changeme-litellm")
+_litellm_proxy_api_base = _get_env(
+    "LITELLM_PROXY_API_BASE", default="http://host.docker.internal:4000"
+) or "http://host.docker.internal:4000"
+_litellm_proxy_model = _get_env("LITELLM_PROXY_MODEL", default="gpt-oss:20b") or "gpt-oss:20b"
+_web_agent_llm_timeout = int(os.getenv("WEB_AGENT_LLM_TIMEOUT", "1200"))
+
 WEB_AGENT_CONFIG = {
     "max_urls": int(os.getenv("WEB_AGENT_MAX_URLS", "5")),
-    "google_api_key": os.getenv("GOOGLE_API_KEY"),
+    "google_api_key": _google_api_key,
+    "google_gemini_model": _google_model,
     "timeout": int(os.getenv("WEB_AGENT_TIMEOUT", "120")),
     "search_engine": os.getenv("WEB_SEARCH_ENGINE", "duckduckgo"),
     "min_relevance_score": int(os.getenv("WEB_MIN_RELEVANCE_SCORE", "2")),
     "enable_llm_clustering": os.getenv("WEB_ENABLE_LLM_CLUSTERING", "true").lower() == "true",
+    "use_litellm_proxy": os.getenv("USE_LITELLM_PROXY", "false").lower() == "true",
+    "litellm_proxy_api_key": _litellm_proxy_api_key,
+    "litellm_proxy_api_base": _litellm_proxy_api_base,
+    "litellm_proxy_model": _litellm_proxy_model,
+    "llm_timeout": _web_agent_llm_timeout,
 }
 
 # Geocoding Configuration

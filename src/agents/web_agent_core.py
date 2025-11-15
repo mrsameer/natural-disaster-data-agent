@@ -8,11 +8,13 @@ disaster data acquisition from web sources.
 import asyncio
 import json
 import logging
+import os
 import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs, unquote
 
+import requests
 from bs4 import BeautifulSoup
 from crawl4ai import AsyncWebCrawler
 from duckduckgo_search import DDGS
@@ -26,13 +28,191 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _normalize_env(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    if "#" in cleaned:
+        hash_index = cleaned.find("#")
+        if hash_index == 0:
+            return None
+        cleaned = cleaned[:hash_index].rstrip()
+    return cleaned or None
+
+
+def _load_llm_config_from_env() -> Optional[Dict[str, Any]]:
+    """Build default LLM configuration from environment variables."""
+    google_api_key = _normalize_env(os.getenv("GOOGLE_API_KEY"))
+    timeout = int(os.getenv("WEB_AGENT_LLM_TIMEOUT", "1200"))
+    if google_api_key and google_api_key.lower() != "your_google_api_key_here":
+        return {
+            "provider": "google",
+            "api_key": google_api_key,
+            "model": _normalize_env(os.getenv("GOOGLE_GEMINI_MODEL")) or "gemini-2.0-flash-exp",
+            "timeout": timeout,
+        }
+
+    use_proxy = os.getenv("USE_LITELLM_PROXY", "false").lower() == "true"
+    proxy_api_key = _normalize_env(os.getenv("LITELLM_PROXY_API_KEY"))
+    proxy_api_base = _normalize_env(os.getenv("LITELLM_PROXY_API_BASE")) or "http://host.docker.internal:4000"
+    proxy_model = _normalize_env(os.getenv("LITELLM_PROXY_MODEL")) or "gpt-oss:20b"
+
+    if use_proxy and proxy_api_key and proxy_api_base:
+        return {
+            "provider": "litellm",
+            "api_key": proxy_api_key,
+            "api_base": proxy_api_base,
+            "model": proxy_model,
+            "timeout": timeout,
+        }
+
+    return None
+
+
+def _clean_json_blob(text: str) -> str:
+    """Strip common markdown fences around JSON payloads."""
+    cleaned = (text or "").strip()
+    if cleaned.startswith("```"):
+        parts = cleaned.split("```")
+        for part in parts:
+            chunk = part.strip()
+            if not chunk:
+                continue
+            if chunk.lower().startswith("json"):
+                return chunk[4:].strip()
+            return chunk
+    return cleaned
+
+
+def _fallback_duckduckgo_html_search(query: str, max_urls: int) -> List[Dict[str, Any]]:
+    """Simple HTML scraping fallback when DDGS API returns nothing."""
+    logger.info("Falling back to DuckDuckGo HTML scraping")
+
+    try:
+        response = requests.get(
+            "https://duckduckgo.com/html/",
+            params={"q": query},
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; DisasterAgent/1.0)",
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+            timeout=20,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        logger.error(f"Fallback DuckDuckGo request failed: {exc}")
+        return []
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    results: List[Dict[str, Any]] = []
+
+    for result in soup.select(".result"):
+        if len(results) >= max_urls:
+            break
+
+        link = result.select_one(".result__a")
+        snippet_el = result.select_one(".result__snippet")
+        if not link:
+            continue
+
+        href = link.get("href")
+        if not href:
+            continue
+
+        # DuckDuckGo wraps outbound links through /l/?uddg=...
+        if href.startswith("/l/?") or "uddg=" in href:
+            parsed = parse_qs(href.split("?", 1)[-1])
+            uddg = parsed.get("uddg")
+            if uddg:
+                href = unquote(uddg[0])
+
+        domain = urlparse(href).netloc
+        results.append(
+            {
+                "url": href,
+                "title": link.get_text(strip=True),
+                "snippet": snippet_el.get_text(strip=True) if snippet_el else "",
+                "domain": domain,
+            }
+        )
+
+    logger.info(f"Fallback search produced {len(results)} URLs")
+    return results
+
+
+def _generate_llm_response(prompt: str, llm_config: Dict[str, Any]) -> str:
+    """Call the configured LLM backend and return the raw response text."""
+    provider = (llm_config or {}).get("provider")
+
+    if provider == "google":
+        client = setup_gemini_client(llm_config["api_key"], llm_config.get("timeout"))
+        model = llm_config.get("model", "gemini-2.0-flash-exp")
+        response = client.models.generate_content(
+            model=model,
+            contents=[types.Content(role="user", parts=[types.Part(text=prompt)])],
+        )
+        return response.candidates[0].content.parts[0].text
+
+    if provider == "litellm":
+        api_base = llm_config.get("api_base")
+        api_key = llm_config.get("api_key")
+        if not (api_base and api_key):
+            raise ValueError("LiteLLM proxy configuration is incomplete")
+
+        url = api_base.rstrip("/") + "/v1/chat/completions"
+        payload = {
+            "model": llm_config.get("model", "gpt-oss:20b"),
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an AI assistant specialized in extracting discrete "
+                        "disaster events from unstructured web content. "
+                        "Always respond with a valid JSON array describing the events."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.2,
+        }
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+        timeout = llm_config.get("timeout", 120)
+        try:
+            response = requests.post(
+                url, headers=headers, json=payload, timeout=timeout
+            )
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            raise RuntimeError(f"LiteLLM proxy request failed: {exc}") from exc
+
+        data = response.json()
+        choices = data.get("choices", [])
+        if not choices:
+            raise RuntimeError("LiteLLM proxy returned no choices")
+
+        message = choices[0].get("message", {})
+        content = message.get("content")
+        if not content:
+            raise RuntimeError("LiteLLM proxy response missing content")
+
+        return content
+
+    raise ValueError(f"Unsupported LLM provider: {provider}")
+
+
 class WebAgentCoreError(Exception):
     """Base exception for web agent core errors"""
 
     pass
 
 
-def setup_gemini_client(api_key: str) -> genai.Client:
+def setup_gemini_client(api_key: str, timeout: Optional[int] = None) -> genai.Client:
     """Initialize Google Gemini client
 
     Args:
@@ -41,7 +221,10 @@ def setup_gemini_client(api_key: str) -> genai.Client:
     Returns:
         Configured Gemini client
     """
-    client = genai.Client(api_key=api_key)
+    client_kwargs: Dict[str, Any] = {"api_key": api_key}
+    if timeout:
+        client_kwargs["http_options"] = {"timeout": timeout}
+    client = genai.Client(**client_kwargs)
     return client
 
 
@@ -148,13 +331,17 @@ def search_web_for_disaster_data(
                     }
                 )
 
+        if not results:
+            logger.warning("Primary DuckDuckGo search returned no results, using fallback")
+            results = _fallback_duckduckgo_html_search(base_query, max_urls)
+
         logger.info(f"Found {len(results)} URLs from search")
         return results
 
     except Exception as e:
         logger.error(f"Search failed: {e}")
         # Return empty list instead of failing completely
-        return []
+        return _fallback_duckduckgo_html_search(base_query, max_urls)
 
 
 async def crawl_urls_with_ai(
@@ -266,33 +453,21 @@ def validate_and_extract(
 
 def cluster_related_content_with_llm(
     validated_data: List[Dict[str, Any]],
-    api_key: str,
+    llm_config: Dict[str, Any],
     disaster_type: str,
     user_query: str,
 ) -> List[Dict[str, Any]]:
-    """Use Google Gemini LLM to cluster content into discrete events
-
-    Args:
-        validated_data: List of validated content
-        api_key: Google API key
-        disaster_type: Type of disaster
-        user_query: User's natural language query
-
-    Returns:
-        List of discrete event clusters
-    """
-    logger.info("Clustering content into discrete events using Gemini LLM")
-
-    if not api_key:
-        logger.warning("No API key provided, skipping LLM clustering")
+    """Use an LLM backend to cluster content into discrete events."""
+    if not llm_config:
+        logger.warning("LLM configuration missing, skipping clustering")
         return []
 
-    try:
-        client = setup_gemini_client(api_key)
+    provider = llm_config.get("provider", "unknown")
+    logger.info(f"Clustering content into discrete events using {provider} backend")
 
-        # Prepare content for LLM
+    try:
         all_content = []
-        for idx, data in enumerate(validated_data):
+        for data in validated_data:
             for para in data["paragraphs"]:
                 all_content.append(
                     {
@@ -304,7 +479,6 @@ def cluster_related_content_with_llm(
                     }
                 )
 
-        # Build LLM prompt
         prompt = f"""
 You are an AI assistant specialized in extracting discrete disaster event information from news articles.
 
@@ -335,19 +509,9 @@ News Content:
 Return a JSON array of discrete events. If no discrete events found, return empty array.
 """
 
-        # Call Gemini API
-        response = client.models.generate_content(
-            model="gemini-2.0-flash-exp",
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.1,
-                response_mime_type="application/json",
-            ),
-        )
-
-        # Parse response
-        events_json = response.text
-        events = json.loads(events_json)
+        raw_text = _generate_llm_response(prompt, llm_config)
+        cleaned = _clean_json_blob(raw_text)
+        events = json.loads(cleaned or "[]")
 
         if isinstance(events, dict) and "events" in events:
             events = events["events"]
@@ -355,8 +519,11 @@ Return a JSON array of discrete events. If no discrete events found, return empt
         logger.info(f"LLM extracted {len(events)} discrete events")
         return events
 
-    except Exception as e:
-        logger.error(f"LLM clustering failed: {e}")
+    except json.JSONDecodeError as exc:
+        logger.error(f"Failed to decode LLM output as JSON: {exc}")
+        return []
+    except Exception as exc:
+        logger.error(f"LLM clustering failed: {exc}")
         logger.exception("Full error:")
         return []
 
@@ -452,6 +619,7 @@ def collect_and_process_disaster_data(
     disaster_type: str = "floods",
     max_urls: int = 3,
     user_query: str = "",
+    llm_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Complete end-to-end disaster data collection workflow
 
@@ -469,17 +637,18 @@ def collect_and_process_disaster_data(
     )
 
     try:
-        # Get API key from environment
-        import os
-
-        api_key = os.getenv("GOOGLE_API_KEY")
-
-        if not api_key:
-            logger.error("GOOGLE_API_KEY not set in environment")
+        # Resolve LLM configuration if not provided
+        llm_config = llm_config or _load_llm_config_from_env()
+        if not llm_config:
+            logger.error("No LLM configuration available for clustering")
             return {
                 "status": "error",
-                "error": "GOOGLE_API_KEY not configured",
-                "summary": {"urls_searched": 0, "urls_crawled": 0, "discrete_events_found": 0},
+                "error": "LLM backend not configured (set GOOGLE_API_KEY or LiteLLM proxy vars)",
+                "summary": {
+                    "urls_searched": 0,
+                    "urls_crawled": 0,
+                    "discrete_events_found": 0,
+                },
                 "final_packets": [],
             }
 
@@ -535,7 +704,7 @@ def collect_and_process_disaster_data(
         # Step 4: Cluster with LLM
         logger.info("Step 4: LLM clustering")
         event_clusters = cluster_related_content_with_llm(
-            validated_data, api_key, disaster_type, user_query
+            validated_data, llm_config, disaster_type, user_query
         )
 
         # Step 5: Generate packets

@@ -59,14 +59,15 @@ class WebAgent(BaseAgent):
         # Configuration
         self.max_urls = WEB_AGENT_CONFIG.get("max_urls", 3)
         self.google_api_key = WEB_AGENT_CONFIG.get("google_api_key")
+        self.google_model = WEB_AGENT_CONFIG.get("google_gemini_model", "gemini-2.0-flash-exp")
+        self.use_litellm_proxy = WEB_AGENT_CONFIG.get("use_litellm_proxy", False)
+        self.litellm_proxy_api_key = WEB_AGENT_CONFIG.get("litellm_proxy_api_key")
+        self.litellm_proxy_api_base = WEB_AGENT_CONFIG.get("litellm_proxy_api_base")
+        self.litellm_proxy_model = WEB_AGENT_CONFIG.get("litellm_proxy_model", "gpt-oss:20b")
         self.timeout = WEB_AGENT_CONFIG.get("timeout", 120)
+        self.llm_timeout = WEB_AGENT_CONFIG.get("llm_timeout", 1200)
 
-        # Validate configuration
-        if not self.google_api_key:
-            raise ValueError(
-                "GOOGLE_API_KEY not set. Set GOOGLE_API_KEY in .env file. "
-                "Get your API key from: https://aistudio.google.com/app/apikey"
-            )
+        self.llm_config = self._build_llm_config()
 
         # Statistics tracking
         self.stats = {
@@ -79,6 +80,36 @@ class WebAgent(BaseAgent):
 
         self.logger.info(
             f"WebAgent initialized: max_urls={self.max_urls}, timeout={self.timeout}s"
+        )
+
+    def _build_llm_config(self) -> Dict:
+        """Determine which LLM backend should power clustering."""
+        if self.google_api_key:
+            self.logger.info("Using Google Gemini for LLM clustering")
+            return {
+                "provider": "google",
+                "api_key": self.google_api_key,
+                "model": self.google_model,
+                "timeout": self.llm_timeout,
+            }
+
+        if (
+            self.use_litellm_proxy
+            and self.litellm_proxy_api_key
+            and self.litellm_proxy_api_base
+        ):
+            self.logger.info("Using LiteLLM proxy for LLM clustering")
+            return {
+                "provider": "litellm",
+                "api_key": self.litellm_proxy_api_key,
+                "api_base": self.litellm_proxy_api_base,
+                "model": self.litellm_proxy_model,
+                "timeout": self.llm_timeout,
+            }
+
+        raise ValueError(
+            "No LLM credentials configured. Provide GOOGLE_API_KEY or enable "
+            "LiteLLM proxy via USE_LITELLM_PROXY + LITELLM_PROXY_* settings."
         )
 
     @retry(
@@ -250,7 +281,8 @@ class WebAgent(BaseAgent):
             result = collect_and_process_disaster_data(
                 disaster_type=disaster_type,
                 max_urls=self.max_urls,
-                user_query=user_query
+                user_query=user_query,
+                llm_config=self.llm_config,
             )
 
             return result
