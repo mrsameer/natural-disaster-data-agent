@@ -22,70 +22,70 @@ services:
     networks:
       - disaster_network
 
-  agent_usgs:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: agent_usgs
-    environment:
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_NAME=disaster_data
-      - DB_USER=disaster_user
-      - DB_PASSWORD=disaster_pass
-      - AGENT_TYPE=usgs
-    depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-    networks:
-      - disaster_network
-    command: python -m src.agents.usgs_agent
+  # agent_usgs:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: agent_usgs
+  #   environment:
+  #     - DB_HOST=postgres
+  #     - DB_PORT=5432
+  #     - DB_NAME=disaster_data
+  #     - DB_USER=disaster_user
+  #     - DB_PASSWORD=disaster_pass
+  #     - AGENT_TYPE=usgs
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   volumes:
+  #     - ./data:/app/data
+  #     - ./logs:/app/logs
+  #   networks:
+  #     - disaster_network
+  #   command: python -m src.agents.usgs_agent
 
-  agent_emdat:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: agent_emdat
-    environment:
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_NAME=disaster_data
-      - DB_USER=disaster_user
-      - DB_PASSWORD=disaster_pass
-      - AGENT_TYPE=emdat
-    depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-    networks:
-      - disaster_network
-    command: python -m src.agents.emdat_agent
+  # agent_emdat:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: agent_emdat
+  #   environment:
+  #     - DB_HOST=postgres
+  #     - DB_PORT=5432
+  #     - DB_NAME=disaster_data
+  #     - DB_USER=disaster_user
+  #     - DB_PASSWORD=disaster_pass
+  #     - AGENT_TYPE=emdat
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   volumes:
+  #     - ./data:/app/data
+  #     - ./logs:/app/logs
+  #   networks:
+  #     - disaster_network
+  #   command: python -m src.agents.emdat_agent
 
-  etl_processor:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: etl_processor
-    environment:
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_NAME=disaster_data
-      - DB_USER=disaster_user
-      - DB_PASSWORD=disaster_pass
-    depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-    networks:
-      - disaster_network
-    command: python -m src.etl.pipeline
+  # etl_processor:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: etl_processor
+  #   environment:
+  #     - DB_HOST=postgres
+  #     - DB_PORT=5432
+  #     - DB_NAME=disaster_data
+  #     - DB_USER=disaster_user
+  #     - DB_PASSWORD=disaster_pass
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   volumes:
+  #     - ./data:/app/data
+  #     - ./logs:/app/logs
+  #   networks:
+  #     - disaster_network
+  #   command: python -m src.etl.pipeline
 
   dashboard:
     build:

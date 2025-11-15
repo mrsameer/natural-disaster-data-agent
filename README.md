@@ -62,6 +62,29 @@ python -m src.etl.pipeline
 python -m src.dashboard.app
 ```
 
+## 🤖 LiteLLM Gateway for Ollama
+
+Use the bundled LiteLLM proxy to expose the locally running Ollama `gpt-oss:20b` model over an OpenAI-compatible REST API.
+
+1. Make sure `ollama` is running on the host and that the `gpt-oss:20b` model is available (`ollama run gpt-oss:20b` will pull it the first time).
+2. Start the LiteLLM container from the repository root:
+   ```bash
+   cd infra/litellm
+   docker compose up -d
+   ```
+3. Send requests to `http://localhost:4000/v1/chat/completions` using the proxy secret defined in `infra/litellm/docker-compose.yml` (`changeme-litellm` by default):
+   ```bash
+   curl http://localhost:4000/v1/chat/completions \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer changeme-litellm" \
+     -d '{
+       "model": "gpt-oss:20b",
+       "messages": [{"role": "user", "content": "Summarize the latest USGS earthquake."}]
+     }'
+   ```
+
+Configuration lives in `infra/litellm/config.yaml`. Update `api_base` if Ollama runs elsewhere, adjust model mappings, and change `LITELLM_PROXY_SECRET` in the compose file before exposing the service outside of localhost. The compose file maps `host.docker.internal` to the host machine so the LiteLLM container can reach the Ollama server listening on `11434`.
+
 ## 📊 Database Setup
 
 ### Using Docker (Automatic)
