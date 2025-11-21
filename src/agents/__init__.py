@@ -2,7 +2,7 @@
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 from loguru import logger
-from datetime import datetime
+from datetime import datetime, date
 import json
 
 from src.database import get_raw_connection
@@ -21,10 +21,46 @@ class BaseAgent(ABC):
         pass
 
     def save_to_staging(self, records: List[Dict]) -> int:
-        """Save fetched records to staging table"""
+        """Save fetched records to staging table or file"""
         if not records:
             self.logger.warning("No records to save")
             return 0
+
+        from src.config import ENABLE_POSTGRES, EVENTS_OUTPUT_DIR
+        
+        if not ENABLE_POSTGRES:
+            try:
+                import json
+                from pathlib import Path
+                
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"events_{self.agent_name}_{timestamp}.json"
+                output_path = Path(EVENTS_OUTPUT_DIR) / filename
+                
+                # Ensure serializable
+                serializable_records = []
+                for record in records:
+                    # Add source name if missing
+                    if "source_name" not in record:
+                        record["source_name"] = self.agent_name
+                        
+                    # Handle datetime serialization
+                    serializable_record = {}
+                    for k, v in record.items():
+                        if isinstance(v, (datetime, date)):
+                            serializable_record[k] = v.isoformat()
+                        else:
+                            serializable_record[k] = v
+                    serializable_records.append(serializable_record)
+                
+                with open(output_path, "w") as f:
+                    json.dump(serializable_records, f, indent=2)
+                    
+                self.logger.info(f"Saved {len(records)} records to file: {output_path}")
+                return len(records)
+            except Exception as e:
+                self.logger.error(f"Failed to save records to file: {e}")
+                raise
 
         conn = get_raw_connection()
         cursor = conn.cursor()

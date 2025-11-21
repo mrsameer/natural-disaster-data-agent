@@ -64,6 +64,11 @@ DB_CONFIG = {
     "password": os.getenv("DB_PASSWORD", "disaster_pass"),
 }
 
+# Standalone Mode Configuration
+ENABLE_POSTGRES = os.getenv("ENABLE_POSTGRES", "true").lower() == "true"
+EVENTS_OUTPUT_DIR = os.getenv("EVENTS_OUTPUT_DIR", str(DATA_DIR / "output"))
+Path(EVENTS_OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
+
 # Database URL for SQLAlchemy
 DB_URL = f"postgresql://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
 
@@ -93,7 +98,7 @@ _litellm_proxy_api_base = _get_env(
     "LITELLM_PROXY_API_BASE", default="http://host.docker.internal:4000"
 ) or "http://host.docker.internal:4000"
 _litellm_proxy_model = _get_env("LITELLM_PROXY_MODEL", default="gpt-oss:20b") or "gpt-oss:20b"
-_web_agent_llm_timeout = int(os.getenv("WEB_AGENT_LLM_TIMEOUT", "1200"))
+_web_agent_llm_timeout = int(os.getenv("WEB_AGENT_LLM_TIMEOUT", "120000"))
 
 WEB_AGENT_CONFIG = {
     "max_urls": int(os.getenv("WEB_AGENT_MAX_URLS", "5")),

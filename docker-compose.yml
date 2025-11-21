@@ -1,26 +1,26 @@
 version: '3.8'
 
 services:
-  postgres:
-    image: timescale/timescaledb-ha:pg17.6-ts2.23.0-all-oss
-    container_name: disaster_db
-    environment:
-      POSTGRES_DB: disaster_data
-      POSTGRES_USER: disaster_user
-      POSTGRES_PASSWORD: disaster_pass
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./src/database/init.sql:/docker-entrypoint-initdb.d/01-init.sql
-      - ./src/database/schema.sql:/docker-entrypoint-initdb.d/02-schema.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U disaster_user -d disaster_data"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - disaster_network
+  # postgres:
+  #   image: timescale/timescaledb-ha:pg17.6-ts2.23.0-all-oss
+  #   container_name: disaster_db
+  #   environment:
+  #     POSTGRES_DB: disaster_data
+  #     POSTGRES_USER: disaster_user
+  #     POSTGRES_PASSWORD: disaster_pass
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #     - ./src/database/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+  #     - ./src/database/schema.sql:/docker-entrypoint-initdb.d/02-schema.sql
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U disaster_user -d disaster_data"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   networks:
+  #     - disaster_network
 
   # agent_usgs:
   #   build:
@@ -87,27 +87,27 @@ services:
   #     - disaster_network
   #   command: python -m src.etl.pipeline
 
-  dashboard:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: disaster_dashboard
-    environment:
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_NAME=disaster_data
-      - DB_USER=disaster_user
-      - DB_PASSWORD=disaster_pass
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "8050:8050"
-    volumes:
-      - ./logs:/app/logs
-    networks:
-      - disaster_network
-    command: python -m src.dashboard.app
+  # dashboard:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: disaster_dashboard
+  #   environment:
+  #     - DB_HOST=postgres
+  #     - DB_PORT=5432
+  #     - DB_NAME=disaster_data
+  #     - DB_USER=disaster_user
+  #     - DB_PASSWORD=disaster_pass
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   ports:
+  #     - "8050:8050"
+  #   volumes:
+  #     - ./logs:/app/logs
+  #   networks:
+  #     - disaster_network
+  #   command: python -m src.dashboard.app
 
   web_agent_api:
     build:
@@ -127,13 +127,13 @@ services:
       - LITELLM_PROXY_API_KEY=${LITELLM_PROXY_API_KEY}
       - LITELLM_PROXY_API_BASE=${LITELLM_PROXY_API_BASE:-http://host.docker.internal:4000}
       - LITELLM_PROXY_MODEL=${LITELLM_PROXY_MODEL:-gpt-oss:20b}
-    depends_on:
-      postgres:
-        condition: service_healthy
+      - WEB_AGENT_LLM_TIMEOUT=120000
+      - ENABLE_POSTGRES=false
     ports:
       - "8080:8080"
     volumes:
       - ./logs:/app/logs
+      - ./data/output:/app/data/output
     networks:
       - disaster_network
     command: >
@@ -141,6 +141,7 @@ services:
 
 volumes:
   postgres_data:
+
 
 networks:
   disaster_network:

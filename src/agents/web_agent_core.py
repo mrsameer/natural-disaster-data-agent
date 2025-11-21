@@ -223,6 +223,7 @@ def setup_gemini_client(api_key: str, timeout: Optional[int] = None) -> genai.Cl
     """
     client_kwargs: Dict[str, Any] = {"api_key": api_key}
     if timeout:
+        logger.info(f"Setting Gemini client timeout to {timeout}")
         client_kwargs["http_options"] = {"timeout": timeout}
     client = genai.Client(**client_kwargs)
     return client
