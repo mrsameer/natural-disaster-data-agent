@@ -133,7 +133,7 @@ services:
       - "8080:8080"
     volumes:
       - ./logs:/app/logs
-      - ./data/output:/app/data/output
+      - ${EVENTS_OUTPUT_DIR:-./data/output}:/app/data/output
     networks:
       - disaster_network
     command: >
