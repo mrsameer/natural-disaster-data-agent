@@ -20,6 +20,7 @@ from crawl4ai import AsyncWebCrawler
 from duckduckgo_search import DDGS
 from google import genai
 from google.genai import types
+from google.oauth2 import service_account
 
 # Setup logging
 logging.basicConfig(
@@ -44,6 +45,26 @@ def _normalize_env(value: Optional[str]) -> Optional[str]:
 
 def _load_llm_config_from_env() -> Optional[Dict[str, Any]]:
     """Build default LLM configuration from environment variables."""
+    # Check for Gemini service account file
+    gemini_key_path = os.path.join(os.getcwd(), "gemini-api-key.json")
+    if os.path.exists(gemini_key_path):
+        try:
+            with open(gemini_key_path, "r") as f:
+                service_account_info = json.load(f)
+            
+            logger.info("Found gemini-api-key.json, using Vertex AI with service account")
+            timeout = int(os.getenv("WEB_AGENT_LLM_TIMEOUT", "1200"))
+            return {
+                "provider": "google_vertex",
+                "service_account_info": service_account_info,
+                "project_id": service_account_info.get("project_id"),
+                "location": "asia-south1",
+                "model": _normalize_env(os.getenv("GOOGLE_GEMINI_MODEL")) or "gemini-2.5-flash",
+                "timeout": timeout,
+            }
+        except Exception as e:
+            logger.error(f"Failed to load Gemini service account key: {e}")
+
     google_api_key = _normalize_env(os.getenv("GOOGLE_API_KEY"))
     timeout = int(os.getenv("WEB_AGENT_LLM_TIMEOUT", "1200"))
     if google_api_key and google_api_key.lower() != "your_google_api_key_here":
@@ -146,12 +167,21 @@ def _generate_llm_response(prompt: str, llm_config: Dict[str, Any]) -> str:
     """Call the configured LLM backend and return the raw response text."""
     provider = (llm_config or {}).get("provider")
 
-    if provider == "google":
-        client = setup_gemini_client(llm_config["api_key"], llm_config.get("timeout"))
+    if provider in ["google", "google_vertex"]:
+        client = setup_gemini_client(llm_config)
         model = llm_config.get("model", "gemini-2.0-flash-exp")
+        
+        config_kwargs = {}
+        if provider == "google_vertex":
+             labels = {
+                "owner-gemini": "disaster_data_agent"
+            }
+             config_kwargs["config"] = types.GenerateContentConfig(labels=labels)
+
         response = client.models.generate_content(
             model=model,
             contents=[types.Content(role="user", parts=[types.Part(text=prompt)])],
+            **config_kwargs
         )
         return response.candidates[0].content.parts[0].text
 
@@ -212,19 +242,38 @@ class WebAgentCoreError(Exception):
     pass
 
 
-def setup_gemini_client(api_key: str, timeout: Optional[int] = None) -> genai.Client:
+def setup_gemini_client(llm_config: Dict[str, Any]) -> genai.Client:
     """Initialize Google Gemini client
 
     Args:
-        api_key: Google API key
+        llm_config: Configuration dictionary containing credentials/API key
 
     Returns:
         Configured Gemini client
     """
-    client_kwargs: Dict[str, Any] = {"api_key": api_key}
+    client_kwargs: Dict[str, Any] = {}
+    
+    if llm_config.get("provider") == "google_vertex":
+        service_account_info = llm_config["service_account_info"]
+        credentials = service_account.Credentials.from_service_account_info(
+            service_account_info, 
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
+        
+        client_kwargs = {
+            "vertexai": True,
+            "credentials": credentials,
+            "project": llm_config["project_id"],
+            "location": llm_config["location"],
+        }
+    else:
+        client_kwargs = {"api_key": llm_config["api_key"]}
+
+    timeout = llm_config.get("timeout")
     if timeout:
         logger.info(f"Setting Gemini client timeout to {timeout}")
         client_kwargs["http_options"] = {"timeout": timeout}
+        
     client = genai.Client(**client_kwargs)
     return client
 
