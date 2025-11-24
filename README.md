@@ -142,6 +142,21 @@ os.environ["USE_LITELLM_PROXY"] = "true"
 
 Leave `GOOGLE_API_KEY` blank (or unset) to force this fallback; if a Gemini key is present, it takes precedence. Any agent that uses LiteLLM can then be initialized with `litellm.use_litellm_proxy = True` and pointed at the `gpt-oss:20b` model exposed via the proxy.
 
+LLM selection order for the web agent:
+- `gemini-api-key.json` at the repo root (Vertex AI service account) if present.
+- `GOOGLE_API_KEY` (Gemini API key) when no service account file is available.
+- LiteLLM proxy when `USE_LITELLM_PROXY` and proxy settings are provided.
+
+When running the Dockerized API, mount your Gemini service account key and point the agent at it:
+
+```yaml
+  web_agent_api:
+    environment:
+      - GEMINI_KEY_PATH=/app/gemini-api-key.json
+    volumes:
+      - ./gemini-api-key.json:/app/gemini-api-key.json:ro
+```
+
 ## 📊 Database Setup
 
 ### Using Docker (Automatic)

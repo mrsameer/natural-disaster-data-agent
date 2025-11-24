@@ -121,6 +121,7 @@ services:
       - DB_USER=disaster_user
       - DB_PASSWORD=disaster_pass
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GEMINI_KEY_PATH=/app/gemini-api-key.json
       - WEB_AGENT_MAX_URLS=${WEB_AGENT_MAX_URLS:-5}
       - WEB_AGENT_TIMEOUT=${WEB_AGENT_TIMEOUT:-120}
       - USE_LITELLM_PROXY=${USE_LITELLM_PROXY:-false}
@@ -134,6 +135,7 @@ services:
     volumes:
       - ./logs:/app/logs
       - ${EVENTS_OUTPUT_DIR:-./data/output}:/app/data/output
+      - ./gemini-api-key.json:/app/gemini-api-key.json:ro
     networks:
       - disaster_network
     command: >

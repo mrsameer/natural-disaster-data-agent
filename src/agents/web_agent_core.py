@@ -11,6 +11,7 @@ import logging
 import os
 import re
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse, parse_qs, unquote
 
@@ -43,22 +44,38 @@ def _normalize_env(value: Optional[str]) -> Optional[str]:
     return cleaned or None
 
 
+def _resolve_gemini_key_path() -> Optional[Path]:
+    candidates: List[Path] = []
+    env_path = _normalize_env(os.getenv("GEMINI_KEY_PATH"))
+    if env_path:
+        candidates.append(Path(env_path).expanduser())
+
+    base_dir = Path(__file__).resolve().parent.parent
+    candidates.append(base_dir / "gemini-api-key.json")
+    candidates.append(Path(os.getcwd()) / "gemini-api-key.json")
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def _load_llm_config_from_env() -> Optional[Dict[str, Any]]:
     """Build default LLM configuration from environment variables."""
     # Check for Gemini service account file
-    gemini_key_path = os.path.join(os.getcwd(), "gemini-api-key.json")
-    if os.path.exists(gemini_key_path):
+    gemini_key_path = _resolve_gemini_key_path()
+    if gemini_key_path and gemini_key_path.exists():
         try:
-            with open(gemini_key_path, "r") as f:
+            with gemini_key_path.open("r") as f:
                 service_account_info = json.load(f)
-            
-            logger.info("Found gemini-api-key.json, using Vertex AI with service account")
+
+            logger.info(f"Found Gemini service account key at {gemini_key_path}, using Vertex AI")
             timeout = int(os.getenv("WEB_AGENT_LLM_TIMEOUT", "1200"))
             return {
                 "provider": "google_vertex",
                 "service_account_info": service_account_info,
                 "project_id": service_account_info.get("project_id"),
-                "location": "asia-south1",
+                "location": os.getenv("GOOGLE_VERTEX_LOCATION", "asia-south1"),
                 "model": _normalize_env(os.getenv("GOOGLE_GEMINI_MODEL")) or "gemini-2.5-flash",
                 "timeout": timeout,
             }
@@ -693,7 +710,7 @@ def collect_and_process_disaster_data(
             logger.error("No LLM configuration available for clustering")
             return {
                 "status": "error",
-                "error": "LLM backend not configured (set GOOGLE_API_KEY or LiteLLM proxy vars)",
+                "error": "LLM backend not configured (add gemini-api-key.json, set GOOGLE_API_KEY, or configure LiteLLM proxy)",
                 "summary": {
                     "urls_searched": 0,
                     "urls_crawled": 0,

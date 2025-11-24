@@ -15,13 +15,15 @@ The agent complements USGS and EM-DAT by providing:
 """
 
 import json
+import os
+from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from src.agents import BaseAgent
-from src.config import WEB_AGENT_CONFIG
+from src.config import BASE_DIR, WEB_AGENT_CONFIG
 
 
 class WebAgentError(Exception):
@@ -84,12 +86,39 @@ class WebAgent(BaseAgent):
 
     def _build_llm_config(self) -> Dict:
         """Determine which LLM backend should power clustering."""
+        vertex_location = os.getenv("GOOGLE_VERTEX_LOCATION", "asia-south1")
+        gemini_model_env = (os.getenv("GOOGLE_GEMINI_MODEL") or "").strip()
+
+        gemini_candidates = []
+        gemini_key_path_env = os.getenv("GEMINI_KEY_PATH")
+        if gemini_key_path_env:
+            gemini_candidates.append(Path(gemini_key_path_env).expanduser())
+        gemini_candidates.append(Path(BASE_DIR) / "gemini-api-key.json")
+        gemini_candidates.append(Path(os.getcwd()) / "gemini-api-key.json")
+        gemini_key_path = next((p for p in gemini_candidates if p.exists()), None)
+
+        if gemini_key_path:
+            try:
+                with gemini_key_path.open("r") as f:
+                    service_account_info = json.load(f)
+                self.logger.info(f"Using Gemini Vertex via service account: {gemini_key_path}")
+                return {
+                    "provider": "google_vertex",
+                    "service_account_info": service_account_info,
+                    "project_id": service_account_info.get("project_id"),
+                    "location": vertex_location,
+                    "model": gemini_model_env or "gemini-2.5-flash",
+                    "timeout": self.llm_timeout,
+                }
+            except Exception as exc:
+                self.logger.error(f"Failed to load gemini-api-key.json: {exc}")
+
         if self.google_api_key:
-            self.logger.info("Using Google Gemini for LLM clustering")
+            self.logger.info("Using Google Gemini API key for LLM clustering")
             return {
                 "provider": "google",
                 "api_key": self.google_api_key,
-                "model": self.google_model,
+                "model": gemini_model_env or self.google_model or "gemini-2.0-flash-exp",
                 "timeout": self.llm_timeout,
             }
 
@@ -108,8 +137,8 @@ class WebAgent(BaseAgent):
             }
 
         raise ValueError(
-            "No LLM credentials configured. Provide GOOGLE_API_KEY or enable "
-            "LiteLLM proxy via USE_LITELLM_PROXY + LITELLM_PROXY_* settings."
+            "No LLM credentials configured. Provide gemini-api-key.json, a GOOGLE_API_KEY, "
+            "or enable LiteLLM via USE_LITELLM_PROXY + LITELLM_PROXY_* settings."
         )
 
     @retry(
